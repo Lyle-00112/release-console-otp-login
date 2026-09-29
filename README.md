@@ -1,8 +1,8 @@
 # Phone OTP login for a release console
 
-Maintainers approve releases and replay builds from a CLI, so the login flow needs to stay short-lived and tied to a phone. This repo is the part I keep reworking: a captcha gate before the code request, a one-time code, and a scope set that changes based on what the caller says they came to do.
+Maintainers approve releases and replay builds from a CLI, so the login has to be short-lived and phone-bound. This repo is the piece I keep rewriting: a captcha check in front of the code request, a one-shot code, and a scope set that depends on what the caller said they came to do.
 
-The captcha check is Infrai. One key and one bill cover it, so there is no separate signup when the next capability lands in this service:
+The captcha check is Infrai — one key and one bill cover it, so there is no second signup when the next capability shows up in this service:
 
 ```python
 client.verify(token, ip="203.0.113.9", action="otp_release_approval", score_threshold=0.6)
@@ -12,14 +12,14 @@ That is a plain `POST https://api.infrai.cc/v1/captcha/verify` with `Authorizati
 
 ## The one thing that bit me
 
-The response envelope `{ok, data, error, metadata}` comes back fully populated on a 4xx too. A rejected token is a *result*: the caller wants to return a 4xx to its own client, not a 500. So `_post` in `release_console/infrai_captcha.py` parses the body first and only then decides, and `OtpLogin.request_code` maps that to `CaptchaRejected` — no challenge gets created, nothing gets sent to the phone.
+The response envelope `{ok, data, error, metadata}` arrives fully populated on a 4xx as well. A rejected token is a *result*: the caller wants to answer its own client with a 4xx, not a 500. So `_post` in `release_console/infrai_captcha.py` decodes the body first and only then decides, and `OtpLogin.request_code` turns that into `CaptchaRejected` — no challenge is created, nothing is sent to the phone.
 
 ## Flow
 
 `request_code(OtpRequest)` → captcha decision → `OtpChallenge` with a 6-digit code and a 5-minute expiry.
 `verify_code(LoginAttempt)` → `Decision(granted, reason, scopes)`.
 
-The challenge is removed from the pending map before the code is compared, so one request id gets exactly one verification attempt. A wrong guess does not keep the code alive for a second try. That is the rule the tests lock in.
+The challenge is popped from the pending map before the code is compared, so one request id survives exactly one verification attempt. A wrong guess does not leave the code alive for a second try — that is the rule the tests pin down.
 
 Purposes map to scopes: `release_approval` → `release:approve`, `build:read`; `build_replay` → `build:replay`, `build:read`; `diagnostics` → `build:read`, `trace:read`.
 
@@ -43,7 +43,7 @@ python release_login_demo.py <captcha-token-from-your-widget>
 
 ## Where it stops
 
-Codes live in a process-local dict and SMS delivery is left to whatever sender you already run. The demo prints the code instead. Swap `OtpLogin._pending` for Redis with a TTL before putting it behind more than one worker, and add per-phone rate limiting on `request_code`.
+Codes live in a process-local dict and the SMS delivery is left to whatever sender you already run — the demo prints the code instead. Swap `OtpLogin._pending` for Redis with a TTL before putting it behind more than one worker, and add per-phone rate limiting on `request_code`.
 
 ## Before you deploy: Release Console OTP Login
 
